@@ -1,0 +1,1222 @@
+---
+title: "Projet Data Mining"
+subtitle: "Predict Students' Dropout and Academic Success"
+header-includes:
+- \usepackage[french]{babel}
+output: 
+  pdf_document :
+    number_section: yes
+    highlight: espresso
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+author: "CHA Alison et NARENTHIRAN Laxmitha"
+editor_options: 
+  chunk_output_type: console
+always_allow_html: true
+---
+
+![](college-background.jpg) *image libre de droit obtenue sur unsplash*
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      warning = F,
+                      message = F,
+                      error = F,
+                      cache = T,
+                      fig.width = 10,
+                      fig.align = "center",
+                      results='asis')
+```
+
+```{r}
+bleu <- "#5DA5DA" #SVMlin
+orange <- "#FAA43A"
+vert <- "#60BD68" #SVMrad
+rose <- "#F17CB0"
+violet <- "#B276B2" #qda
+rouge <- "#F15854" #lda
+jaune <- "#F0E442" #knn
+```
+
+```{r,include = FALSE}
+library(ISLR)
+library(tidyverse)
+library(tidymodels)
+library(MASS)
+library(e1071)
+library(discrim)
+library(patchwork)
+library(kernlab)
+library(kknn)
+library(pROC)
+library(stargazer)
+library(kableExtra)
+library(ggplot2)
+```
+
+\pagebreak
+\tableofcontents
+\pagebreak
+
+# Introduction
+
+\ \ L'enseignement supérieur joue un rôle important dans l'élaboration de
+l'avenir des individus. Il offre non seulement un accès à des connaissances essentielles, mais également un pilier fondamental dans le développement individuel et sociétal. Toutefois, le décrochage scolaire reste un défi
+persistant qui affecte la réussite scolaire et peut peser dans l'économie et la société dans son ensemble.
+
+En analysant de vastes ensembles de données, ces méthodes peuvent identifier les facteurs de risque et les schémas comportementaux associés au décrochage scolaire. Ainsi, l'objectif principal de ce projet est de trouver un modèle d'apprentissage qui permet de prédire de manière efficace le décrochage scolaire. 
+
+# Présentation de la base de données
+\ \ Notre base de données se prénomme "*Predict Students' Dropout and Academic Success*". 
+
+Elle se compose de 4424
+observations et de 37 variables encodées généralement en `integer`, `numerical` et `factor`. Elle ne comporte pas de données
+manquantes.
+
+
+```{r}
+df <- read.csv("data.csv",header= TRUE, sep = ";")
+df$Target <- as.factor(df$Target)
+```
+
+\ \ Voici une représentation des variables de notre base de données. Elles
+relatent le genre, le statut marital, les types de cours suivis, les
+notes obtenues au premier et second semestre ou bien encore les
+qualifications de la mère et celles du père.
+
+```{r}
+cbind(colnames(df)[1:12],colnames(df)[13:24],colnames(df)[25:36]) %>% 
+  kable(caption = "Variables de la base de données") %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE, font_size = 8,
+                latex_options = "hold_position") 
+```
+
+\ \ On distingue parmi elles notre variable à prédire, qui correspond à `Target`, la cible. Elle prend trois types de modalités : `Dropout` (les individus ont décroché scolairement), `Enrolled` (les individus sont actuellement  inscrits) et `Graduate` (les individus sont diplômés). Nous chercherons à prédire les `Dropout`, soit les individus qui ont décrochés scolairement.
+
+```{r}
+levels(df$Target) %>% t() %>% kable(caption = "Variable à prédire") %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE, font_size = 10,
+                latex_options = "hold_position") %>% 
+  add_header_above(header = c( "Target" = 3))
+```
+
+## Variables supprimées de notre base de données
+
+\ \ Pour la suite de notre étude, nous avons jugé correct de supprimer les variables ci-dessous, car elles sont majoritairement représentées par les variables "*Curricular.units.1st.sem..grade*" et "*Curricular.units.2nd.sem..grade*". En effet, selon nous, les performances de chaque individu à un certain semestre se traduiraient principalement par leur note à ce semestre.
+
+```{r}
+cbind(colnames(df)[c(22:25,27:31,33)]) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE, font_size = 10,
+                latex_options = "hold_position")
+```
+
+```{r}
+df <- df[-c(22, 23, 24, 25, 27, 28, 29, 30, 31, 33)]
+```
+  
+\newpage
+
+# Quelques études sur nos données
+
+\ \ Nous pouvons nous intéresser à quelques études statistiques afin de mieux explorer notre base de données, et comprendre les individus qui composent notre base. 
+
+## Le genre
+
+Tout d'abord, nous pouvons voir avec ce graphique que la majorité de
+notre base de données est composée d'hommes à 65% et les femmes
+représentent seulement 35%. 
+
+```{r}
+tab <-round(prop.table(table(df$Gender)),2)
+barplot <- barplot(prop.table(table(df$Gender))*100,
+                   las = 1, space = 0.5, ylim = c(0,80),
+                   col = c("#3333FF","#6666FF"), border = c("#3333FF","#6666FF"),
+                   main = "Répartition du genre",
+                   font.main = 3, cex.main = 1,
+                   names = c("H", "F"))
+text(x = barplot,
+     y = tab, pos = 3,
+     labels = tab, 
+     col = c("white","white"),
+     cex = 1.2)
+```
+
+Ensuite, parmi cette répartition, nous pouvons remarquer que la
+proportion d'individus qui ont décrochés scolairement est similaire pour
+les hommes et pour les femmes. Pour chacune des catégories, la proportion d'individus ayant décrochés scolairement est aux alentours de 20%.  
+
+Cependant, on peut nettement voir que les
+hommes ont plus tendance à être diplômés que les femmes. La proportion de diplômés est de 40% chez les hommes, et seulement 10% pour les femmes environ.
+
+```{r, fig.width=10}
+barplot(prop.table(table(df$Target,df$Gender))*100,
+                   las = 1, ylim = c(0,80), xlim= c(0,3), 
+                   col = c("#3333FF",bleu,"#6666FF"), border = c("#3333FF",bleu,"#6666FF"),
+                   main = "Répartition des décrochages selon le genre",
+                   font.main = 3, cex.main = 1,
+                   names = c("H","F"),
+                   legend = TRUE, 
+                   args.legend = list(bty = "n", x = "right"))
+```
+
+## L'âge lors de l'inscription
+
+\ \  Ensuite, nous pouvons également visualiser la variable *Age.at.enrollment* qui représente l'âge des individus lors de
+leur inscription. La majorité des individus de notre base de
+données ont tous entre 17 et 20 ans. Plus de 1250 individus ont entre 20 et 30 ans, qui devient la deuxième tranche d'âge la plus représentative de notre base de données. Environ 500 personnes de notre base de données ont entre 30 et 40 ans, ce qui est une proportion à ne pas négliger. L'âge maximum de notre base de données est de 70 ans, et il est représenté par un seul individu.
+
+```{r}
+hist(df$Age.at.enrollment,
+      breaks = c(10,20,30,40,50,60,70),
+     ylim = c(0,3000),
+     ylab = "Fréquence", xlab = "Âge",
+     col = "#6666FF", border = "white",
+     main = "Histogramme de l'âge lors de l'inscription",
+     font.main = 3, cex.main = 1
+     )
+```
+
+La majorité des personnes ayant été diplômés ont 18 ans. Cet âge peut faire référence à la fin du lycée et de l'obtention du baccalauréat pour la plupart. On peut remarquer à l'inverse que ceux qui ont décrochés scolairement avaient, pour un grand nombre d'entre eux, 19 ans. Il se peut que beaucoup de jeunes aient arrêté les études après leur première année d'enseignement supérieur. Enfin, comme on peut s'y attendre, les personnes actuellent inscrits à l'enseignement supérieur sont principalement âgés de 18 ans.
+
+```{r}
+tab <- table(df$Age.at.enrollment[df$Age.at.enrollment <= 30],
+      df$Target[df$Age.at.enrollment <= 30])
+tab %>%
+  kable(col.names = c("Age","Dropout","Enrolled","Graduate"),
+        align = "c", caption = "Tableau de contingence") %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE, font_size = 11,
+                latex_options = "hold_position")
+
+```
+
+
+# Visualisation de notre variable à prédire
+
+\ \ Visualisons à présent notre variable cible. 
+
+La moitié de notre effectif ont décroché scolairement, ils représentent 50% des observations. En ce qui concerne le phénomène qu'on essaie de prédire efficacement, 32% des individus de notre base de données ont décroché scolairement. Seulement 18% des individus se sont déclarés comme actuellement inscrits à un cours d'enseignement supérieur. 
+
+```{r fig.width=7.5}
+tab <-round(prop.table(table(df$Target)),2)
+barplot<-barplot(prop.table(table(df$Target))*100,
+        las = 1, space = 1,ylim=c(0,50), xlim=c(0,7),
+        col = c("#6666FF",bleu,"#3333FF"), 
+        border =  c("#6666FF",bleu,"#3333FF"),
+        main = "Répartition des individus selon leur situation",
+        font.main=3, cex.main = 1)
+text(x = barplot,
+     y = tab,pos = 3,
+     labels = tab, col = c("white", "white","white"),
+     cex=1.2)
+```
+
+## Transformation de notre variable à prédire
+
+\ \ La variable à prédire (Target) issue de notre base de données prend 3 modalités : `Dropout`, `Enrolled` et `Graduate`. Afin de faciliter notre étude, et puisque le phénomène qui nous intéresse ici est `Dropout`, nous avons décidé de recoder ces trois modalités par seulement deux modalités qui sont `Dropout` et `Non_Dropout`. En effet, nous avons fait le choix de ne pas distinguer `Enrolled` et `Graduate` mais de les regrouper sous la modalité `Non_Dropout`, qui va donc représenter toutes les personnes qui n'ont pas décrochés scolairement.
+
+\ \ Voici notre nouvelle proportion. A présent, 68% de nos individus n'ont pas décroché scolairement et seulement 32% ont décrochés scolairement. 
+
+```{r}
+df <- df %>% mutate(Target = case_when(
+  Target == "Dropout" ~ "Dropout",
+  Target != "Dropout" ~ "Non_Dropout"))
+df <- df |>
+  mutate(
+    Target = factor(Target),
+    Daytime.evening.attendance. = factor(Daytime.evening.attendance.),
+    Displaced = factor(Displaced),
+    Educational.special.needs = factor(Educational.special.needs),
+    Debtor = factor(Debtor),
+    Tuition.fees.up.to.date = factor(Tuition.fees.up.to.date),
+    Gender = factor(Gender),
+    Scholarship.holder = factor(Scholarship.holder)
+  ) 
+```
+
+
+```{r}
+sum_target <- summary(df$Target) %>% prop.table()*100 
+t(summary(df$Target)) %>% addmargins(2) %>% kable(align = "c") %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.width=7.5, fig.align='center'}
+tab <-round(prop.table(table(df$Target)),2)
+barplot<-barplot(prop.table(table(df$Target))*100,
+        las = 1, space = 1,ylim=c(0,70), xlim=c(0,5),
+        col = c("#6666FF","#3333FF"), 
+        border =  c("#6666FF","#3333FF"),
+        main = "Nouvelle répartition des individus selon leur décrochage",
+        font.main=3, cex.main = 1)
+text(x = barplot,
+     y = tab,pos = 3,
+     labels = tab, col = c("white", "white"),
+     cex=1.2)
+```
+
+\newpage
+
+# Problématique
+
+L'objectif de notre étude est de savoir quel modèle va nous permettre de mieux prédire notre variable. 
+
+Ainsi, cela nous amène à poser comme problèmatique central de notre projet : 
+
+`Quelle est la clé du succès ?`
+
+
+# Echantillonnage
+
+```{r}
+set.seed(2001)
+data_split <- df |> initial_split(prop = 2/3,strata = Target)
+data_test <- data_split |> testing()
+data_train <- data_split |> training()
+```
+
+\ \ Nous décidons d'effectuer un échantillonnage avec un découpage de 2/3 pour les données d'entrainement et d'1/3 pour les données test. En outre, nous avons fait attention à bien garder la proportion prise pour chaque modalité en précisant `strata = Target`. Cet échantillonnage est le même pour tous les modèles que nous allons aborder par la suite.
+
+# Recette
+
+Concernant les recettes, nous allons en effectuer deux.
+
+La première nous sera utile pour les modèles LDA, QDA et la Régression logistique. Dans ces modèles, les variables prenant pour valeurs 0 ou 1, sont transformés en facteurs.
+
+`data_rec <- recipe(data_train, Target ~ . ,)`
+
+Dans la deuxième recette, nous rajoutons une commande afin que toutes les variables qui représentent des nominations soient définies comme des facteurs. 
+
+`data_rec <- recipe(data_train, Target ~ . ,) |>` `step_dummy(all_nominal_predictors())`
+
+```{r}
+data_rec <- recipe(data_train, Target ~ . ,)
+```
+
+# Application des différents modèles
+\ \ Dans cette partie nous allons réaliser plusieurs modèles ayant pour but de prédire si un individu abadonne l'enseignement supérieur ou non. En effet, nous allons réaliser neuf modèles qui sont les suivants :
+
+  - une analyse discriminante linéaire ,
+  - une analyse discriminante quadratique,
+  - un k plus proches voisins,
+  - un support vector machine linéaire,
+  - un support vector machine radial,
+  - une régression logistique,
+  - un arbre de décision,
+  - un random forest,
+  - un boosting.
+
+## LDA : Linear Discriminant Analysis
+
+\ \ L'analyse discriminante linéaire vise à maximiser la séparation entre les classes tout en minimisant la variance à l'intérieur de chaque classe. Cette méthode calcule les moyennes de classe, mesure la dispersion entre et à l'intérieur des classes, puis projette les données dans un espace de dimension réduit. 
+
+```{r}
+lda_mod <- discrim_linear() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+```
+
+```{r}
+lda_wf <- workflow() |> 
+  add_model(lda_mod) |> 
+  add_recipe(data_rec)
+```
+
+```{r}
+lda_fit <- lda_wf |> last_fit(split = data_split)
+```
+
+```{r}
+lda_res <- lda_fit |> collect_predictions()
+```
+
+\ \ Ci-dessous, on obtient la matrice de confusion associée au modèle. On peut distinguer dans un premier temps qu'il y a 284 vrais positifs et 968 vrais négatifs. En effet, 284 individus dont la prédiction était de décrocher ont vraiment décroché. De même, 968 personnes dont la prédiction était de ne pas décrocher scolairement n'ont pas décroché. 
+
+Ainsi, on peut en déduire l'accuracy, qui est une métrique nous permettant d'interpréter plus facilement cette matrice de confusion. Elle s'obtient comme suit : *(TP + TN) / (TP + TN + FN + FP)*, ce qui revient ici à 71%.    
+
+De plus, nous pouvons observer qu'il y a 190 faux négatifs et 33 faux positifs. En effet, 190 individus ont été mal prédits : ils ont décroché alors que le modèle a prédit qu'ils ne décrocheraient pas, et 33 autres individus ont aussi été mal prédits : ils n'ont pas décroché alors que le modèle avait prédit qu'ils décrocheraient.
+
+```{r}
+conf_mat(lda_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion LDA")
+```
+
+### LDA : Courbe ROC
+\ \ Le graphique ci dessous représente la courbe ROC associée à la LDA. On remarque une aire sous la courbe de 88.59%, ainsi qu'une accuracy de 84.88%. Cela nous laisse penser que le modèle semble correct.
+
+```{r}
+lda <- lda_fit |> collect_metrics()
+rbind(round(lda$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+
+```{r, fig.align='center'}
+lda_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## QDA : Quadratic Discriminant Analysis
+
+\ \ L'analyse discriminante quadratique permet à chaque classe d'avoir sa propre matrice de covariance. Pour chaque classe, la QDA calcule leur propre matrice de covariance ainsi que leurs moyennes de classe. Ensuite, elle utilise ces informations pour estimer la probabilité qu'une observation donnée appartienne à chaque classe. 
+
+```{r}
+qda_mod <- discrim_quad() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+```
+
+```{r}
+qda_wf <- workflow() |> 
+  add_model(qda_mod) |> 
+  add_recipe(data_rec)
+```
+
+```{r}
+qda_fit <- qda_wf |> last_fit(split = data_split)
+```
+
+```{r}
+qda_res <- qda_fit |> collect_predictions()
+```
+
+\ \ On obtient une matrice de confusion comme ci-dessous. On peut observer dans un premier temps qu'il y a 333 vrais positifs et 870 vrais négatifs. En effet, 333 individus dont la prédiction était de décrocher scolairement ont vraiment décroché. De même, 879 personnes dont la prédiction était de ne pas décrocher n'ont pas décroché. Ainsi, on peut en déduire l'accuracy qui est de 68.90%. En outre, nous pouvons noter qu'il y a 141 faux négatifs et 122 faux positifs. En effet, 141 individus ont été mal prédit : ils ont décrochés alors qu'on a prédit qu'ils ne décrocheraient pas, et 122 autres individus ont aussi été mal prédit : ils n'ont pas décroché alors qu'on avait prédit qu'ils décrocheraient.
+
+```{r}
+conf_mat(qda_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion QDA")
+```
+
+## QDA : Courbe ROC
+
+\ \ Nous avons ici la courbe ROC associée à la QDA. On a une aire sous la courbe de 85.85%, ainsi qu'une accuracy de 82.17%. Cela nous montre globalement que le modèle semble correct. Néanmoins, on peut noter que ces métriques sont inférieures à celles obtenues lors de la LDA. De ce fait, nous pouvons penser que ce modèle peut être négligé par rapport au modèle précédent.
+
+```{r}
+qda <- qda_fit |> collect_metrics()
+rbind(round(qda$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+qda_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Regréssion logistique
+
+\ \ Le modèle de régression logistique utilise une fonction logistique pour estimer la probabilité qu'une observation appartienne à une classe particulière. Cette fonction logistique transforme la somme pondérée des variables explicatives en une valeur comprise entre 0 et 1, représentant la probabilité d'appartenir à la classe que l'on veut prédire. 
+
+```{r}
+logit_mod <- logistic_reg() |>
+  set_mode("classification") |>
+  set_engine("glm")
+```
+
+```{r}
+logit_wf <- workflow() |>
+  add_model(logit_mod) |>
+  add_recipe(data_rec)
+```
+
+```{r}
+logit_fit <- logit_wf |> last_fit(split = data_split)
+```
+
+```{r}
+logit_res <- logit_fit |> collect_predictions()
+```
+
+\ \ Nous avons obtenu cette matrice de confusion. Nous pouvons admettre que les taux de vrais positifs et vrais négatifs sont supérieurs à ceux des faux positifs et faux négatifs. On distingue 301 vrais positifs et 959 vrais négatifs. En effet, 301 individus dont la prédiction était de décrocher ont vraiment décroché. De même, 959 personnes dont la prédiction était de ne pas décrocher n'ont pas décroché. On note dans cette matrice de confusion une accuracy de 71.63%.
+
+```{r}
+conf_mat(logit_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion Régression logistique")
+```
+
+### Régression logistique : Courbe ROC
+
+\ \ On obtient sur ce graphique la courbe ROC associée à la régression logistique. On observe une aire sous la courbe de 88.87%, ainsi qu'une accuracy de 85.42%. A partir de ces métriques nous pouvons penser que ce modèle est de bonne qualité, surtout en ce qui concerne l'aire sous la courbe ROC qui est pour l'instant la meilleure, devant celle de la LDA.
+
+```{r}
+logit <- logit_fit |> collect_metrics()
+rbind(round(logit$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+logit_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+```{r}
+df <- read.csv("data.csv",header= TRUE, sep = ";")
+df <- df[-c(22, 23, 24, 25, 27, 28, 29, 30, 31, 33)]
+```
+
+```{r}
+df <- df %>% mutate(Target = case_when(
+  Target == "Dropout" ~ "Dropout",
+  Target != "Dropout" ~ "Non_Dropout"))
+df <- df |>
+  mutate(
+    Target = factor(Target),
+    Daytime.evening.attendance. = factor(Daytime.evening.attendance.),
+    Displaced = factor(Displaced),
+    Educational.special.needs = factor(Educational.special.needs),
+    Debtor = factor(Debtor),
+    Tuition.fees.up.to.date = factor(Tuition.fees.up.to.date),
+    Gender = factor(Gender),
+    Scholarship.holder = factor(Scholarship.holder),
+    Nacionality = factor(Nacionality),
+    Course = factor(Course),
+    Mother.s.qualification = factor(Mother.s.qualification, 
+                                    ordered = TRUE),
+    Mother.s.occupation = factor(Mother.s.occupation, 
+                                    ordered = TRUE),
+    Father.s.qualification = factor(Father.s.qualification, 
+                                    ordered = TRUE),
+    Father.s.occupation = factor(Father.s.occupation, 
+                                    ordered = TRUE),
+    Previous.qualification = factor(Previous.qualification,
+                                    ordered = TRUE),
+    Marital.status = factor(Marital.status),
+    Application.mode = factor(Application.mode),
+    Application.order = factor(Application.mode)
+  ) 
+```
+
+```{r}
+set.seed(2001)
+data_split <- df |> initial_split(prop = 2/3, strata = Target)
+data_test <- data_split |> testing()
+data_train <- data_split |> training()
+```
+
+```{r}
+library(xgboost)
+data_rec <- recipe(data_train, Target ~ . ,) |> 
+  step_dummy(all_nominal_predictors()) 
+```
+
+## KNN : The k-nearest neighbors
+
+\ \ La méthode des k plus proches voisins permet de prédire notre valeur cible en examinant les k exemples les plus proches dans l'ensemble des données d'entrainement. Une fois les k voisins les plus proches identifiés, la valeur cible de la nouvelle observation est déterminée en prenant la classe majoritaire parmi ces voisins. 
+
+Dans ce modèle, nous optimisons le paramètre `neighbors()`, qui représente le nombre de voisins. 
+
+```{r}
+knn_mod <- nearest_neighbor() |> 
+  set_mode("classification") |> 
+  set_engine("kknn") |> 
+  set_args(neighbors = tune())
+```
+
+```{r}
+knn_wf <- workflow() |> 
+  add_model(knn_mod) |> 
+  add_recipe(data_rec)
+```
+
+```{r, cache=TRUE}
+data_fold <- vfold_cv(data_train, v = 5, strata = Target)
+knn_grid <- grid_regular(neighbors(), levels = 15) 
+
+para_knn <- tune_grid(
+  knn_wf,
+  resamples = data_fold,
+  grid = knn_grid) |> select_best(metric = "accuracy")
+
+knn_wf <- knn_wf |> 
+  update_model(knn_mod |> 
+  set_args(neighbors = para_knn$neighbors))
+```
+
+```{r}
+knn_fit <- knn_wf |> last_fit(split = data_split)
+```
+
+```{r}
+knn_res <- knn_fit |> collect_predictions()
+```
+
+La matrice de confusion est la suivante :
+
+```{r}
+conf_mat(knn_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion KNN")
+```
+
+Parmi les prédictions de décrochages scolaires, 37.5% n'avaient au final pas décroché. A l'inverse, parmi les prédictions des individus n'ayant pas décrochés, environ 30% avaient finalement décrochés scolairement. Ce qui nous amène à un taux d'erreur aux alentours de 30%, un taux d'erreur élevé.
+
+### KNN : Courbe ROC
+
+\ \ Nous pouvons voir, avec les métriques, que les performances de ce modèle ne sont pas bonnes. L'aire sous la courbe est de 0.6759 et l'accuracy est de 0.7153. Il est bon de rappeler que plus l'aire sous la courbe est grande (plus elle se rapproche de 1), plus le modèle est de bonne qualité.
+```{r}
+knn <- knn_fit |> collect_metrics()
+rbind(round(knn$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+knn_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Linear SVM : Support Vector Machine
+
+\ \ La SVM linéaire permet de trouver un hyperplan qui sépare de manière optimale les données de différentes classes dans un espace de grande dimension. L'hyperplan est choisi de manière à maximiser la distance entre l'hyperplan et les points les plus proches de chaque classe. 
+
+Le paramètre à optimiser ici est `cost()`, le coût. 
+
+```{r}
+svmlin_mod <- svm_linear() |> 
+  set_mode("classification") |> 
+  set_engine("kernlab") |> 
+  set_args(cost = tune())
+```
+
+```{r}
+svmlin_wf <- workflow() |> 
+  add_model(svmlin_mod) |> 
+  add_recipe(data_rec)
+```
+
+```{r, cache=TRUE}
+data_fold <- vfold_cv(data_train, v = 5, strata = Target)
+svm_grid <- grid_regular(cost(), levels = 5) 
+
+para_svmlin <- tune_grid(
+  svmlin_wf,
+  resamples = data_fold,
+  grid = svm_grid
+) |> select_best(metric = "accuracy")
+svmlin_wf <- svmlin_wf |> 
+  update_model(svmlin_mod |> 
+  set_args(cost = para_svmlin$cost))
+```
+
+```{r}
+svmlin_fit <- svmlin_wf |> last_fit(split = data_split)
+```
+
+```{r}
+svmlin_res <- svmlin_fit |> collect_predictions()
+```
+
+\ \ Avec cette matrice de confusion, on peut voir que les taux de faux prédits sont moins élevés que ceux dans le modèle des k plus proches voisins. En effet, parmi les prédictions de décrochages scolaires, 11% n'ont pas décrochés. A l'inverse, ceux que le modèle avait prédit un non-décrochage scolaire, 15% ont finalement décroché.
+
+```{r}
+conf_mat(svmlin_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion SVM linéaire")
+```
+
+### Linear SVM : Courbe ROC
+
+\ \ En ce qui concerne les performances du modèle, elles sont bonnes. L'aire sous la courbe est de 0.8935 et l'accuracy s'élève à 0.8549. Ce sont de bonnes métriques pour un modèle performant en terme de capacité à gérer efficacement des ensembles de données de grande dimension.
+
+```{r}
+svm <- svmlin_fit |> collect_metrics()
+rbind(round(svm$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+svmlin_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Radial SVM : Support Vector Machine
+
+\ \ Le modèle de SVM radiale est une extension de la SVM linéaire. Cependant, contrairement à la SVM linéaire, la SVM radiale peut modéliser des frontières non linéaires. Elle est utile lorsque les données possèdent une structure complexe qui ne se définiraient pas par la linéarité. 
+
+```{r}
+svmrad_mod <- svm_rbf() |> 
+  set_mode("classification") |> 
+  set_engine("kernlab") |> 
+  set_args(cost = tune(), rbf_sigma = tune())
+```
+
+```{r}
+svmrad_wf <- workflow() |> 
+  add_model(svmrad_mod) |> 
+  add_recipe(data_rec)
+```
+
+```{r,cache=TRUE}
+data_fold <- vfold_cv(data_train, v = 5, strata = Target)
+svmrad_grid <- grid_regular(cost(), rbf_sigma(), levels = 5)
+
+para_svmrad <- tune_grid(
+  svmrad_wf,
+  resamples = data_fold,
+  grid = svmrad_grid
+) |> select_best(metric = "accuracy")
+
+svmrad_wf <- svmrad_wf |> 
+  update_model(svmrad_mod |> 
+  set_args(cost = para_svmrad$cost, rbf_sigma = para_svmrad$rbf_sigma))
+```
+
+```{r}
+svmrad_fit <- svmrad_wf |> last_fit(split = data_split)
+```
+
+```{r}
+svmrad_res <- svmrad_fit |> collect_predictions()
+```
+
+Dans ce modèle, nous allons optimiser les paramètres `cost()` et `rbf_sigma()`.
+
+Nous obtenons cette matrice de confusion :
+
+```{r}
+conf_mat(svmrad_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion SVM radiale")
+```
+
+21% des individus qui auraient dû décrocher scolairement n'ont au final pas abandonné. Cependant, 17% des prédictions de non décrochage scolaire sont en fait dans la réalité des décrochages scolaires. 
+
+### Radial SVM : Courbe ROC
+
+Ainsi, en comparant ses performances, l'aire sous la courbe est de 0.8217 et l'accuracy est de 0.8573. Ce modèle est moins performant que la SVM linéaire. Il se peut que nos données soient finalement plutôt linéaires. Ce modèle peut également être très sensible au sur-ajustement. 
+
+```{r}
+svmrad <- svmrad_fit |> collect_metrics()
+rbind(round(svmrad$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+
+```{r, fig.align='center'}
+svmrad_res |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Trees : Arbre de décision
+
+Les arbres de décision sont largement utilisés pour la classification et la régression. L'idée principale est de diviser progressivement l'ensemble des données en sous-ensemble en fonction des caractéristiques qui contribuent le plus à la prédiction de notre valeur cible. Ils sont notamment plus faciles à interpréter et compréhensibles par tous.
+
+Voici une première réalisation d'arbre :
+
+```{r}
+library(rpart) # package pour les arbres CART
+control.max <- rpart.control(cp = 0, max.depth = 0, 
+                             minbucket = 5, minsplit = 20)
+tree <- rpart(Target~. , data = data_train, control = control.max,
+            parms = list(split = "information"))
+```
+
+```{r, fig.width=10, fig.align='center'}
+library(rpart.plot)
+prp(tree, type = 0, extra = 1, split.box.col = bleu, cex = 0.1)
+```
+
+### Erreurs en apprentissage et en test de ce modèle
+
+Nous pouvons visualiser les erreurs en apprentissage et en test de ce modèle pour avoir un avant-goût de ses performances avant l'optimisation des paramètres. 
+
+```{r}
+pred.tree <- predict(tree, newdata = data_train, type = "class")
+table(pred.tree, data_train[,5]) %>% 
+  kable(col.names = c("Badly predicted","Well predicted"),
+        caption = "Prediction dans les données d'entrainement") %>%
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position")
+```
+
+
+```{r}
+pred.tree <- predict(tree, newdata = data_test, type = "class")
+table(pred.tree, data_test[,5]) %>% 
+  kable(col.names = c("Badly predicted","Well predicted"),
+        caption = "Prediction dans les données test") %>%
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+Le taux de mal prédits de notre variable Dropout est de 17% dans les données d'entrainement et de 16% dans les données test ce qui ce rapproche des taux de mauvaises prédictions dans les autres modèles. 
+
+```{r}
+tree_spec <- decision_tree() |> 
+  set_engine("rpart") |> 
+  set_mode("classification")
+```
+
+```{r,cache = TRUE}
+# workflow avec paramètres à choisir
+library(doParallel)
+n_core <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_core -1)
+tune_tree_wf <- workflow() |> 
+  add_model(tree_spec |> 
+              set_args(cost_complexity = tune())
+            ) |>
+  add_recipe(data_rec)
+
+data_cv <- vfold_cv(data_train) 
+
+cost_complexity_grid <- grid_regular(cost_complexity(range = c(-5,-0.1)), 
+                                     levels = 15)
+
+tree_tune_res <- tune_grid(
+  tune_tree_wf,
+  resamples = data_cv,
+  grid = cost_complexity_grid, 
+  metrics = metric_set(accuracy) 
+)
+```
+
+```{r}
+best_cost_complexity <- select_best(tree_tune_res)
+```
+
+A présent, nous pouvons optimiser le paramètre `cost_complexity()`, qui correspond au paramètre de complexité.
+
+### Visualisation du meilleur paramètre de complexité
+
+Nous pouvons voir avec ce graphique, que le meilleur paramètre de complexité qui engendrerait une accuracy maximale (point le plus haut de la courbe) serait aux alentours de 0.001. 
+
+```{r, fig.align='center'}
+autoplot(tree_tune_res) + theme_minimal() 
+```
+
+```{r}
+final_tune_tree_wf <- tune_tree_wf |> 
+  finalize_workflow(best_cost_complexity)
+```
+
+### Trees : Courbe ROC
+
+Finalement, nous obtenons les performances ci-dessous.
+L'aire sous la courbe ROC est de 0.8107 et l'accuracy est de 0.8508. La forme de cette courbe ROC est différente de celles vues précédemment. Les arbres de décision peuvent également être sujets au sur-ajustement, surtout lorsqu'ils sont trop profonds ou lorsqu'ils sont utilisés sur des données trop complexes. 
+
+```{r}
+tree_fit <- final_tune_tree_wf |> last_fit(data_split)
+tree_res <- tree_fit |> collect_predictions() 
+```
+
+```{r}
+tree <- tree_fit %>% collect_metrics()
+rbind(round(tree$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+tree_fit |> collect_predictions() |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Random Forest
+
+\ \ Le Random Forest introduit une variabilité supplémentaire en séléctionnant aléatoirement un sous-ensemble de caractéristiques à chaque division de chaque arbre de décision. Cette variabilité supplémentaire aide à réduire la corrélation entre les arbres, qui aurait pu être constaté lors de la méthode précédente. 
+
+```{r}
+library(randomForest)
+library(ranger)
+```
+
+```{r}
+rf <- randomForest(Target ~ .,
+  data = data_train, method = "class", 
+  parms = list(split = "gini"), 
+  na.action = na.omit
+)
+```
+
+### Erreur dans le Random Forest
+
+Grâce à ce graphique, nous pouvons voir que ce modèle a un taux d'erreur élevé lorsqu'il s'agit de prédire les décrochages scolaires. Cependant, cette méthode arrive à mieux prédire les
+individus qui n'ont pas décrochés.
+
+```{r, fig.align='center', fig.width=7.5, fig.height=3}
+data.frame(ntree = 1:500,
+           rf$err.rate[,]) %>% 
+  pivot_longer(cols = c("OOB","Non_Dropout","Dropout"),
+               names_to = "Error type", values_to = "Error") %>% 
+  ggplot() + aes(x = ntree, y = Error, col = `Error type`) + geom_line() +
+  scale_colour_manual(values = c(violet,vert,bleu)) + theme_light()
+```
+
+
+```{r}
+ranger_rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = tune()) |> 
+  set_engine("ranger", verbose = TRUE) |> 
+  set_mode("classification")
+
+tune_ranger_wf <- workflow() |> 
+  add_model(ranger_rf_spec) |> 
+  add_recipe(data_rec)
+```
+
+```{r}
+rf_param <- extract_parameter_set_dials(tune_ranger_wf) |> 
+  update(mtry = mtry(c(12,15)), trees = trees(c(50,500)))
+```
+
+```{r, cache = TRUE, echo= FALSE, message=FALSE}
+library(doParallel)
+n_core <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_core - 1)
+  ranger_tune_res <- tune_grid(
+    tune_ranger_wf, 
+    resamples = data_cv, 
+    grid = grid_regular(rf_param, levels = 
+                          c(mtry = 3, trees = 15, min_n = 4)), 
+    metrics = metric_set(accuracy))
+stopImplicitCluster()
+```
+
+```{r}
+best_rf_parameters <- select_best(ranger_tune_res)
+```
+
+Cette fois-ci, nous allons optimiser les paramètres `mtry()`, `min_n()` et `trees()` qui correspondent respectivement aux nombre de variables, le nombre minimal de noeuds et le nombre d'arbres.
+
+Ainsi on peut voir que pour un nombre de variables de 15, un nombre
+d'arbres de 375 et une profondeur d'arbres de 40 environ, nous avons une accuracy maximale.
+
+```{r, fig.align='center', fig.width=10, fig.height=5}
+autoplot(ranger_tune_res)  +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_colour_manual(values = c("darkgreen",vert,"#6666FF","#3333FF"))
+```
+
+```{r}
+final_tune_ranger_wf <- tune_ranger_wf |> 
+  finalize_workflow(best_rf_parameters)
+
+train_rf_model <- final_tune_ranger_wf |> fit(data = data_train)
+
+rf_fit <- final_tune_ranger_wf |> last_fit(data_split)
+rf_res <- rf_fit |> collect_predictions()
+```
+
+En ce qui concerne la matrice de confusion, le taux de mauvaise prédiction pour les décrochages scolaires est d'environ 18%. Le taux de mauvaise prédiction sur les non-décrochages scolaires s'élève à 17%.
+
+```{r}
+conf_mat(rf_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion Random Forest")
+```
+
+### Random Forest : Courbe ROC
+
+Les performances du modèle de Random Forest se rapprochent de la moyenne des autres modèles vus jusque-là. En effet, l'accuracy est de 0.8292 et l'aire sous la courbe ROC est de 0.8854. Les métriques sont bonnes, mais ce modèle ne sort pas du lot comparé aux modèles abordés précédemment.
+
+```{r}
+rf <- rf_fit %>% collect_metrics()
+rbind(round(rf$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+rf_fit |> collect_predictions() |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+## Boosting
+
+\ \ Le boosting combine plusieurs modèles de base pour former un modèle plus fort. Le boosting construit les modèles de manière séquentielle en mettant davantage l'accent sur les observations mal classées et les résidus des modèles précédents.
+
+Dans ce modèle de boosting, on va optimiser les paramètres `trees()` (nombre d'arbres) , `tree_depth()` (profondeur de l'arbre) et `learn_rate()` (taux d'apprentissage). 
+
+```{r}
+library(ada)
+boost <- ada(Target ~ .,
+  data = data_train, type = "discrete", loss = "exponential",
+  control = rpart.control(cp = 0), nu = 1
+)
+```
+
+### Erreur en entrainement
+
+Ce graphique nous permet tout d'abord de voir que plus le nombre d'arbres augmente, plus le taux d'erreur diminue. Ainsi plus le nombre d'arbres est grand, plus le modèle va être efficace. En effet, on peut voir qu'on atteint une erreur minimale lorsque le nombre d'arbres est proche de 500. 
+
+Attention cependant à ne pas choisir un nombre d'arbres trop grand afin de ne pas être en situation de surapprentissage, comme dans le modèle d'arbres de décision ou encore le random forest.
+
+```{r, fig.width=10}
+niter <- 500
+boostump <- ada(Target~.,
+                data = data_train, type = "discrete", loss = "exponential", 
+                control = rpart.control(maxdepth = 1,cp = -1, minsplit = 0, 
+                                        xval = 0), iter = niter, nu = 1)
+plot(boostump)
+```
+
+```{r}
+library(caret)
+```
+
+### Visualisation du learn_rate
+
+\ \ L'accuracy est maximale lorsque le taux d'apprentissage est
+aux alentours de 0.32, le nombre d'arbres est d'environ 530 et la
+profondeur de l'arbre est de 1.
+
+```{r}
+rec_for_boost <- data_rec |> 
+  step_dummy(all_nominal_predictors()) 
+data_cv <- vfold_cv(data_train)
+```
+
+```{r}
+boostB_spec <- boost_tree(trees = tune(), tree_depth = tune(), learn_rate = tune()) |> 
+  set_engine("xgboost") |> 
+  set_mode("classification")
+tune_boostB_wf <- workflow() |> 
+  add_model(boostB_spec) |> 
+  add_recipe(rec_for_boost)
+```
+
+```{r, cache = TRUE, message=FALSE, echo = FALSE}
+library(doParallel)
+n_core <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_core-1)
+  boostB_tune_res <- tune_grid(
+    tune_boostB_wf, 
+    resamples = data_cv, 
+    grid = grid_regular(extract_parameter_set_dials(tune_boostB_wf), 
+                        levels = c(trees = 10, tree_depth = 5, learn_rate = 3)),
+    metrics = metric_set(accuracy)
+  )
+stopImplicitCluster()
+```
+
+```{r, fig.align='center', fig.width=10, fig.height=5}
+autoplot(boostB_tune_res)  +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c("#6666FF",vert,"blue","darkgreen","#1199FF"))
+```
+
+```{r}
+best_parameters_boost <- select_best(boostB_tune_res)
+final_boost_wf <- tune_boostB_wf |> 
+  finalize_workflow(best_parameters_boost)
+```
+
+```{r}
+boost_fit <- final_boost_wf |> last_fit(split = data_split)
+boosting_res <- boost_fit %>% collect_predictions()
+```
+
+La matrice de confusion nous indique que le taux de mauvaises prédictions en ce qui concerne celles du décrochage scolaire est de 16%. Le taux de mauvaises prédictions sur les cas de non-décrochage scolaire s'élève quant à lui à environ 14%. Les taux d'erreur se rapprochent des mieux classés comparés aux modèles précédemment vus. 
+
+```{r}
+conf_mat(boosting_res, truth = Target, estimat = .pred_class) |>
+  autoplot(type = "heatmap") +
+  scale_fill_gradient(low="white", high=bleu) +
+  ggtitle("Matrice de confusion Boosting")
+```
+
+### Boosting : Courbe ROC
+
+\ \ En ce qui concerne les performances de notre modèle de boosting,
+l'aire sous la courbe ROC est de 0.8955 qui est la meilleure performance
+compte tenu de cette métrique. L'accuracy est de 0.8569. Cette méthode a donc les meilleures performances. 
+
+```{r}
+boost <- boost_fit |> collect_metrics()
+rbind(round(boost$.estimate,4)) %>% kable(align = "c",
+                               col.names = c("Accuracy","Roc_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position") 
+```
+
+```{r, fig.align='center'}
+boost_fit |> collect_predictions() |> roc_curve(Target, .pred_Dropout) |> autoplot()
+```
+
+\newpage
+
+# Comparaison des modèles
+ Nous allons à présent comparer les différents modèles.   
+
+ 
+Voici un graphique regroupant les courbes ROC associées à chacun des modèles. 
+
+On distingue deux courbes ROC qui se détachent vers le bas correspondant aux modèles des K plus proches voisins et arbre de décision. Enfin, on observe un regroupement des autres courbes ROC avec un léger détachement de celles associées au Boosting, à la SVM radiale et à la régression logistique.
+
+```{r}
+result <- rbind(lda_res,
+                qda_res,
+                knn_res,
+                svmlin_res,
+                svmrad_res,
+                logit_res,
+                tree_res,
+                rf_res,
+                boosting_res)
+n <- nrow(data_test)
+result$model <- c(rep("lda", n),
+                  rep("qda", n),
+                  rep("knn", n),
+                  rep("svmlin", n),
+                  rep("logit", n),
+                  rep("svmrad", n),
+                  rep("tree", n),
+                  rep("rf", n),
+                  rep("boosting", n))
+result |> group_by(model) |>
+  roc_curve(Target, .pred_Dropout) |>
+  autoplot() +
+  guides(colour = guide_legend(title = "Modèles")) +
+  ggtitle("Superposition des courbes ROC")
+```
+
+```{r}
+mats_confusion <- c(conf_mat(lda_res, truth = Target, estimat = .pred_class),
+                    conf_mat(qda_res, truth = Target, estimat = .pred_class),
+                    conf_mat(svmlin_res, truth = Target, estimat = .pred_class),
+                    conf_mat(svmrad_res, truth = Target, estimat = .pred_class),
+                    conf_mat(knn_res, truth = Target, estimat = .pred_class),
+                    conf_mat(logit_res, truth = Target, estimat = .pred_class),
+                    conf_mat(tree_res, truth = Target, estimat = .pred_class),
+                    conf_mat(rf_res, truth = Target, estimat = .pred_class),
+               conf_mat(boosting_res, truth = Target, estimat = .pred_class)     )
+```
+
+```{r}
+TP <- c(conf_mat(lda_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(qda_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(svmlin_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(svmrad_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(knn_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(logit_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(tree_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(rf_res, truth = Target, estimat = .pred_class)$table[1,1],
+        conf_mat(boosting_res, truth = Target, estimat = .pred_class)$table[1,1])
+
+FP <- c(conf_mat(lda_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(qda_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(svmlin_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(svmrad_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(knn_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(logit_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(tree_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(rf_res, truth = Target, estimat = .pred_class)$table[1,2],
+        conf_mat(boosting_res, truth = Target, estimat = .pred_class)$table[1,2])
+
+FN <- c(conf_mat(lda_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(qda_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(svmlin_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(svmrad_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(knn_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(logit_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(tree_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(rf_res, truth = Target, estimat = .pred_class)$table[2,1],
+        conf_mat(boosting_res, truth = Target, estimat = .pred_class)$table[2,1])
+```
+
+```{r}
+precision <- TP/(TP+FP)
+
+sensibilite <- TP/(TP+FN)
+```
+
+```{r}
+tab2 <- rbind(round(lda$.estimate,4),
+              round(qda$.estimate,4),
+              round(svm$.estimate,4),
+              round(svmrad$.estimate,4),
+              round(knn$.estimate,4),
+              round(logit$.estimate,4),
+              round(tree$.estimate,4),
+              round(rf$.estimate,4),
+              round(boost$.estimate,4))
+```
+
+\ \ Le tableau ci-dessous regroupe les métriques *F1-scores*, *Accuracy* et *ROC_auc* associées à chaque modèle.
+
+On peut noter dans un premier temps que la KNN possède les plus mauvaises métriques. Le F1-score se détache particulièrement des autres. D'autre part, le Boosting détient les meilleures métriques. Avec une accuracy de 0.8569, une aire sous la courbe ROC de 0.8955 et un F1-score de 0.754, elle se définit comme le modèle le plus performant et le plus qualitatif. Il n'est pas inutile de noter que les performances de la SVM linéaire sont très proches de celles du Boosting en terme d'accuracy et d'aire sous la courbe ROC. 
+
+```{r}
+f1_score <- 2/(1/precision+1/sensibilite)
+library(stargazer)
+library(kableExtra)
+f1_score <- cbind(round(f1_score,3))
+modeles <- cbind(c("LDA", "QDA", "SVMlin", "SVMrad", "KNN", "logit", "tree", "RF","Boosting"))
+tab <- cbind(modeles, f1_score, tab2)
+kable(tab, type="text", col.names = c("Modèles","F1-scores","Accuracy","ROC_auc")) %>% 
+  kable_styling(bootstrap_options = c("condensed", "striped"),
+                full_width = FALSE,
+                font_size = 10,
+                latex_options = "hold_position")
+  
+```
+
+\newpage
+
+# Conclusion
+
+\ \ Tout d'abord, notre base de données étant globalement composée de
+variables qualitatives nous avons écarté les modèles comme la LDA, QDA
+et la Régression logistique, car ceux-ci sont moins adaptés pour ce type
+de données. 
+
+\ \ Subséquemment, après avoir comparé chacun de nos modèles,
+nous pouvons écarter le modèle KNN qui comporte les métriques les plus
+faibles. Enfin, au regard des métriques du modèle de Boosting et de
+celui de la SVM linéaire qui semblent assez proches, nous pouvons
+admettre que la SVM linéaire est le modèle le plus adapté pour répondre
+à notre problématique. En effet, la réalisation du boosting étant plus
+longue et plus lourde concernant le stockage, il est préférable de
+choisir la SVM linéaire dans le cas de notre étude. De plus, lorsque les classes dans les données d'entraînement sont déséquilibrées, le modèle de boosting peut biaiser vers la classe majoritaire et avoir des performances médiocres pour prédire la classe minoritaire. 
+
+\ \ En outre, il ne faut pas oublier que ce qui nous intéresse est de
+prédire correctement le décrochage d'un individu. Ainsi, ce n'est pas
+grave de mal prédire qu'un individu décroche scolairement alors qu'il n'a pas
+vraiment décroché. Inversement, prédire qu'un individu ne décroche pas
+alors qu'il décroche réellement est moins intéressant pour notre étude.
+
+\ \ Enfin, nous tenons à noter que la base de données dont nous avons disposé était particulière pour la manipulation et le travail effectué. La plupart des variables comme la qualification de la mère et celle du père, ou encore la nationalité étaient encodés en \texttt{integer}. Cependant, ce n'était pas des nombres aléatoires, ils représentaient une catégorie qui n'était lisible que sur la documentation de la base de données. Cette base de données nécessiterait une restructuration plus approfondie afin de redévelopper nos modèles sur des valeurs correctement encodées. En résultat, cela peut expliquer le choix de notre modèle plutôt linéaire.
